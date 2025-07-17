@@ -30,7 +30,7 @@ def callback():
 @handler.add(JoinEvent)
 def handle_join(event):
     gid   = event.source.group_id if event.source.type == 'group' else None
-    reply = f"強哥的 Bot 加入群組囉！本群組ID：{gid}"
+    reply = f"Bot 加入群組囉！本群組ID：{gid}"
     line_bot_api.reply_message(event.reply_token, TextSendMessage(text=reply))
 
 # 處理收到訊息事件
@@ -39,10 +39,10 @@ def handle_message(event):
     txt = event.message.text
     if event.source.type == 'group':
         gid   = event.source.group_id
-        reply = f"強哥好！收到群組({gid})訊息：{txt}"
+        reply = f"收到群組({gid})訊息：{txt}"
     else:
         uid   = event.source.user_id
-        reply = f"強哥好！你的 userId：{uid}"
+        reply = f"你的 userId：{uid}"
     line_bot_api.reply_message(event.reply_token, TextSendMessage(text=reply))
 
 if __name__ == "__main__":
