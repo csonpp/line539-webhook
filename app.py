@@ -1,6 +1,7 @@
 import os
 import sys
 import subprocess
+import re
 from flask import Flask, request, abort
 from linebot import LineBotApi, WebhookHandler
 from linebot.exceptions import InvalidSignatureError
@@ -21,6 +22,7 @@ handler       = WebhookHandler(LINE_CHANNEL_SECRET)
 COMMAND_SCRIPTS = {
     '注單': 'line-4.py',       # 執行 line-4.py
     '對獎': 'lotto-line.py',   # 執行 lotto-line.py
+    # 想新增腳本只需在此加入 '指令': '檔名.py'
 }
 
 # Webhook 接收路由
@@ -47,32 +49,42 @@ def handle_message(event):
     txt = event.message.text.strip()
     print(f"🔍 Received message text: '{txt}'")  # Debug log
 
-    # 先處理 English 'id' 指令
+    # 顯示伺服器環境
+    print(f"🔍 Current working dir: {os.getcwd()}")
+    print(f"🔍 Files in cwd: {os.listdir()}")
+
+    # 如果使用者輸入 id，回傳 userId
     if txt.lower() == 'id':
         user_id = event.source.user_id or event.source.group_id
         reply = f"你的 userId：{user_id}"
     else:
-        # 處理自訂命令
         executed = False
         for trigger, script in COMMAND_SCRIPTS.items():
             if trigger in txt:
-                try:
-                    # 使用同 Python 直譯器執行對應腳本
-                    result = subprocess.run(
-                        [sys.executable, script],
-                        cwd=os.getcwd(), capture_output=True, text=True, timeout=60
-                    )
-                    if result.returncode == 0:
-                        output = result.stdout.strip() or '(程式執行完成，無輸出)'
-                        reply = f"{script} 執行完成：\n{output}"
-                    else:
-                        reply = f"{script} 執行失敗：\n{result.stderr.strip()}"
-                except Exception as e:
-                    reply = f"執行 {script} 發生例外：{e}"
+                print(f"🔍 Trigger '{trigger}' matched, attempt to run script: {script}")
+                # 檢查檔案是否存在
+                if not os.path.exists(script):
+                    print(f"❌ Script file not found: {script}")
+                    reply = f"找不到腳本檔: {script}"
+                else:
+                    try:
+                        result = subprocess.run(
+                            [sys.executable, script],
+                            cwd=os.getcwd(), capture_output=True, text=True, timeout=60
+                        )
+                        if result.returncode == 0:
+                            output = result.stdout.strip() or '(程式執行完成，無輸出)'
+                            reply = f"{script} 執行完成：\n{output}"
+                        else:
+                            print(f"❌ {script} error: {result.stderr.strip()}")
+                            reply = f"{script} 執行失敗：\n{result.stderr.strip()}"
+                    except Exception as e:
+                        print(f"❌ Exception running {script}: {e}")
+                        reply = f"執行 {script} 發生例外：{e}"
                 executed = True
                 break
-        # 如果沒有命令觸發，就原文回覆
         if not executed:
+            print("🔍 No command trigger matched, echo back.")
             reply = txt
 
     line_bot_api.reply_message(
