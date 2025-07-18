@@ -30,17 +30,17 @@ def callback():
 @handler.add(JoinEvent)
 def handle_join(event):
     gid   = event.source.group_id if event.source.type == 'group' else None
-    reply = f"Bot 加入群組囉！本群組ID：{gid}"
+    reply = f"強哥的 Bot 加入群組囉！本群組ID：{gid}"
     line_bot_api.reply_message(event.reply_token, TextSendMessage(text=reply))
 
 # 處理收到訊息事件
 @handler.add(MessageEvent, message=TextMessage)
-@handler.add(MessageEvent, message=TextMessage)
 def handle_message(event):
     txt = event.message.text.strip()
+    print(f"🔍 Received message text: '{txt}'")  # Debug log
     # 如果使用者輸入 id（不區分大小寫），回傳他的 userId
     if txt.lower() == "id":
-        user_id = event.source.user_id
+        user_id = event.source.user_id or event.source.group_id
         reply = f"你的 userId：{user_id}"
     else:
         # 否則就原封不動把文字回給他
@@ -50,8 +50,6 @@ def handle_message(event):
         event.reply_token,
         TextSendMessage(text=reply)
     )
-
-
 if __name__ == "__main__":
     port = int(os.getenv("PORT", 5000))
     app.run(host="0.0.0.0", port=port)
