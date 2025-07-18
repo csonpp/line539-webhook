@@ -1,15 +1,25 @@
+import os
+import re
+import sys
 import requests
 from bs4 import BeautifulSoup
-import re
 from math import comb
+from datetime import datetime
 
-LINE_CHANNEL_TOKEN = "UCWxMVzypOWSEB2qUaBF+kIzUtKQYAAAsvR5k1praIARx4K2gR7v3/FaSYG8k7K9LcRDdn1Pzf/okys0TN2V+UoHtwXKaZ4a21AZ8vzkjMwLtZTWHuR5RuHXtkltpFxP+t4D0NxxrpRV2l261spcXwdB04t89/1O/w1cDnyilFU="
+# ---- 驗證 credentials.json (可選，不存在時略過 Drive 上傳) ----
+# 此腳本無需使用 Drive，上傳功能保持可選結構
+skip_drive = False
+# 若未來需加上 Drive 功能，可參考其他腳本加入憑證檢查
+
+# ====== 設定區 ======
+LINE_CHANNEL_TOKEN = os.getenv("LINE_CHANNEL_TOKEN") or "UCWxMVzypOWSEB2qUaBF+kIzUtKQYAAAsvR5k1praIARx4K2gR7v3/FaSYG8k7K9LcRDdn1Pzf/okys0TN2V+UoHtwXKaZ4a21AZ8vzkjMwLtZTWHuR5RuHXtkltpFxP+t4D0NxxrpRV2l261spcXwdB04t89/1O/w1cDnyilFU="
 LINE_USER_IDS = [
-    "Ub8f9a069deae09a3694391a0bba53919",
+    os.getenv("LINE_USER_ID") or "Ub8f9a069deae09a3694391a0bba53919",
     # 可加入多個 user_id 或 group_id
 ]
+# ==================
 
-def fetch_and_save_draws(filename="lottery_line.txt", retry=3): 
+def fetch_and_save_draws(filename="lottery_line.txt", retry=3):
     url = "https://www.pilio.idv.tw/lto539/list.asp"
     for attempt in range(retry):
         try:
@@ -71,20 +81,18 @@ def parse_group_result_file(filename="group_result.txt"):
         content = f.read()
     sets = {}
     for set_name in ["A + B", "A + C", "B + C"]:
-        pattern = rf"{re.escape(set_name)}（.*?\）：\n((?:.+\n)+?)(?=\n|$)"
+        pattern = rf"{re.escape(set_name)}（.*?）：\n((?:.+\n)+?)(?=\n|$)"
         m = re.search(pattern, content)
         if not m:
             continue
         lines = m.group(1).strip().split("\n")
         number_rows = []
         for line in lines:
-            # 跳過「位置」行、空行
             if "位置" in line or re.match(r"^\s*$", line):
                 continue
             nums = list(map(int, re.findall(r"\d+", line)))
             if nums:
                 number_rows.append(nums)
-        # 橫排轉縱列（以縱列為柱）
         pillars = []
         for i in range(7):
             pillar = []
@@ -101,9 +109,9 @@ def check_group_winning(open_nums, group_set):
         for idx, pillar in enumerate(group_set):
             if num in pillar:
                 pillar_hits[idx] += 1
-                break  # 只計算一次
+                break
     hit_pillars = sum(1 for x in pillar_hits if x > 0)
-    total_hits = sum(pillar_hits)  # 不會超過5
+    total_hits = sum(pillar_hits)
     return hit_pillars, total_hits, pillar_hits
 
 def calc_hits(hit_pillars, total_hits, pillar_hits):
@@ -141,7 +149,7 @@ def make_lottery_report(open_nums, group_sets):
             )
             碰數 = calc_hits(hit_pillars, total_hits, pillar_hits)
             total_碰 += 碰數
-            lines.append(f"{name}：中{hit_pillars}柱，共{total_hits}個號碼（{detail}），中{碰數}碰")
+            lines.append(f"{name}：中{hit_pillars}柱，共{total_hits}個號碼（{detail}），中{碰碰數}碰")
         else:
             lines.append(f"{name}：未中獎，中0碰")
     lines.append(f"本期合計共中{total_碰}碰")
@@ -153,7 +161,6 @@ if __name__ == "__main__":
         group_sets = parse_group_result_file("group_result.txt")
         open_nums = list(map(int, re.findall(r"開獎號碼：([\d ,]+)", latest)[0].replace(',', ' ').split()))
         report = make_lottery_report(open_nums, group_sets)
-        from datetime import datetime
         now_str = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
         msg = f"{latest}\n{report}\n推播時間：{now_str}"
         print(msg)
