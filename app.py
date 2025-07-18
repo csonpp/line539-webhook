@@ -35,15 +35,22 @@ def handle_join(event):
 
 # 處理收到訊息事件
 @handler.add(MessageEvent, message=TextMessage)
+@handler.add(MessageEvent, message=TextMessage)
 def handle_message(event):
-    txt = event.message.text
-    if event.source.type == 'group':
-        gid   = event.source.group_id
-        reply = f"收到群組({gid})訊息：{txt}"
+    txt = event.message.text.strip()
+    # 如果使用者輸入 id（不區分大小寫），回傳他的 userId
+    if txt.lower() == "id":
+        user_id = event.source.user_id
+        reply = f"你的 userId：{user_id}"
     else:
-        uid   = event.source.user_id
-        reply = f"你的 userId：{uid}"
-    line_bot_api.reply_message(event.reply_token, TextSendMessage(text=reply))
+        # 否則就原封不動把文字回給他
+        reply = txt
+
+    line_bot_api.reply_message(
+        event.reply_token,
+        TextSendMessage(text=reply)
+    )
+
 
 if __name__ == "__main__":
     port = int(os.getenv("PORT", 5000))
