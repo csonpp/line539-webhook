@@ -19,28 +19,28 @@ import json
 SERVICE_ACCOUNT_FILE = "credentials.json"  # 用 OAuth 下載的 credentials.json
 SCOPES = ['https://www.googleapis.com/auth/drive.file']
 
-LINE_CHANNEL_TOKEN = "UCWxMVzypOWSEB2qUaBF+kIzUtKQYAAAsvR5k1praIARx4K2gR7v3/FaSYG8k7K9LcRDdn1Pzf/okys0TN2V+U oHtwXKaZ4a21AZ8vzkjMwLtZTWHuR5RuHXtkltpFxP+t4D0NxxrpRV2l261spcXwdB04t89/1O/w1cDnyilFU="
+LINE_CHANNEL_TOKEN = "UCWxMVzypOWSEB2qUaBF+kIzUtKQYAAAsvR5k1praIARx4K2gR7v3/FaSYG8k7K9LcRDdn1Pzf/okys0TN2V+UoHtwXKaZ4a21AZ8vzkjMwLtZTWHuR5RuHXtkltpFxP+t4D0NxxrpRV2l261spcXwdB04t89/1O/w1cDnyilFU="
 LINE_USER_IDS = [
     "Ub8f9a069deae09a3694391a0bba53919",
-    # 可再加第二、第三位 userId
 ]
 # ==================
 
-# ---- 驗證 credentials.json ----
+# ---- 驗證 credentials.json (可選，不存在時略過 Drive 上傳) ----
+skip_drive = False
 try:
     with open(SERVICE_ACCOUNT_FILE, "r", encoding="utf-8") as tf:
         json.load(tf)
-except FileNotFoundError:
-    print(f"❌ 找不到 {SERVICE_ACCOUNT_FILE}，請放在腳本同一資料夾並命名正確")
-    sys.exit(1)
-except json.JSONDecodeError as e:
-    print(f"❌ 無法解析 {SERVICE_ACCOUNT_FILE}，請重新下載 OAuth credentials 金鑰檔，錯誤：{e}")
-    sys.exit(1)
+except Exception as e:
+    print(f"⚠️ 無法讀取 {SERVICE_ACCOUNT_FILE}，Drive 上傳功能將被略過：{e}")
+    skip_drive = True
 
-# ★★★★★ 不要再 import 或使用 service_account 相關內容 ★★★★★
+# ★★★★★ 其餘功能原樣保留，不動 ★★★★★
 
 def upload_and_get_link(filename):
-    SCOPES = ['https://www.googleapis.com/auth/drive.file']
+    global skip_drive
+    if skip_drive:
+        print("⚠️ 跳過 upload_and_get_link，因為找不到憑證")
+        return ""
     creds = None
     if os.path.exists('token.pickle'):
         with open('token.pickle', 'rb') as token:
@@ -55,7 +55,6 @@ def upload_and_get_link(filename):
     media = MediaFileUpload(filename, mimetype='text/plain')
     file = service.files().create(body=file_metadata, media_body=media, fields='id').execute()
     file_id = file.get('id')
-    # 設為公開可讀
     service.permissions().create(fileId=file_id, body={'role': 'reader', 'type': 'anyone'}).execute()
     share_link = f"https://drive.google.com/file/d/{file_id}/view?usp=sharing"
     print(f"📤 已上傳 {filename} 並產生分享連結")
@@ -246,10 +245,10 @@ def save_groups_and_bets(A, B, C, today_draw=None,
         write_combination_rows("B + C", B, C, f)
         if today_draw:
             f.write("對獎結果：\n")
-            f.write(f"👉 本期號碼：{sorted(f"{n:02}" for n in today_draw)}\n")
+            f.write(f"👉 本期號碼：{sorted(today_draw)}\n")
             for title, combo in [("A+B", AB), ("A+C", AC), ("B+C", BC)]:
                 hits = set(combo) & set(today_draw)
-                f.write(f"{title} 中獎：{sorted(f"{h:02}" for h in hits)} （{len(hits)}）\n")
+                f.write(f"{title} 中獎：{sorted(hits)} （{len(hits)}）\n")
             f.write("\n")
 
 def backup_group_result():
@@ -264,14 +263,14 @@ def backup_group_result():
 def send_email_report():
     msg = EmailMessage()
     msg["Subject"] = "今彩539下注報告"
-    msg["From"]    = "twblackbox@gmail.com"   # 改成 Brevo 的 SMTP 用戶名
+    msg["From"]    = "twblackbox@gmail.com"
     msg["To"]      = "csonpp@gmail.com"
     msg.set_content("請查收 group_result.txt")
     with open("group_result.txt", "rb") as f:
         msg.add_attachment(f.read(), maintype="text",
                            subtype="plain", filename="group_result.txt")
     smtp_user = "908708004@smtp-brevo.com"
-    smtp_pass = "Wx8670BtzIcnO9hm"   # ←請換成你最新的 API Key
+    smtp_pass = "Wx8670BtzIcnO9hm"
     try:
         with smtplib.SMTP("smtp-relay.brevo.com", 587) as s:
             s.starttls()
@@ -289,7 +288,6 @@ def send_line_push(text):
     }
     for uid in LINE_USER_IDS:
         payload = {"to": uid, "messages": [{"type": "text", "text": text}]}
-        print("▶ 推播 payload:", payload)
         resp = requests.post(url, headers=headers, json=payload, timeout=10)
         if resp.status_code == 200:
             print(f"📨 已成功推播給 {uid}")
@@ -298,29 +296,21 @@ def send_line_push(text):
 
 def main():
     hist = "lottery_history.txt"
-    # 1) 首次 or 空檔 → 全抓；否則增量補
     if not os.path.exists(hist) or os.path.getsize(hist) == 0:
         ok = fetch_and_save_draws(hist)
         if not ok:
             open(hist, "w", encoding="utf-8").close()
     else:
         append_missing_draws(hist)
-    # 2) 補至少兩期
     ensure_two_local(hist)
-    # 3) 補今日
     today_draw = check_and_append_today_draw(hist)
-    # 4) 讀最近兩期、分組、排版、對獎、備份、通知
     recent, cg, _ = read_latest_2_draws(hist)
     A, B, C = group_numbers(cg)
-    save_groups_and_bets(A, B, C, today_draw,
-                        filename="group_result.txt",
-                        recent_lines=recent)
+    save_groups_and_bets(A, B, C, today_draw, filename="group_result.txt", recent_lines=recent)
     backup_group_result()
     send_email_report()
-    # 5) 上傳 Drive 並取回公開連結
     share_link = upload_and_get_link("group_result.txt")
     print("🔗 Drive 分享連結：", share_link)
-    # 6) LINE 推播檔案連結
     dt = datetime.today().strftime("%Y-%m-%d")
     send_line_push(f"今彩539下注報告已完成 ({dt})，點此下載報表：\n{share_link}")
 
