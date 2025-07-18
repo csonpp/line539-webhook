@@ -50,8 +50,10 @@ def handle_message(event):
     print(f"🔍 Received message text: '{txt}'")  # Debug log
 
     # 顯示伺服器環境
-    print(f"🔍 Current working dir: {os.getcwd()}")
-    print(f"🔍 Files in cwd: {os.listdir()}")
+    cwd = os.getcwd()
+    files = os.listdir(cwd)
+    print(f"🔍 Current working dir: {cwd}")
+    print(f"🔍 Files in cwd: {files}")
 
     # 如果使用者輸入 id，回傳 userId
     if txt.lower() == 'id':
@@ -59,29 +61,42 @@ def handle_message(event):
         reply = f"你的 userId：{user_id}"
     else:
         executed = False
+        reply = None
         for trigger, script in COMMAND_SCRIPTS.items():
             if trigger in txt:
                 print(f"🔍 Trigger '{trigger}' matched, attempt to run script: {script}")
+                executed = True
                 # 檢查檔案是否存在
-                if not os.path.exists(script):
+                if not os.path.isfile(os.path.join(cwd, script)):
                     print(f"❌ Script file not found: {script}")
                     reply = f"找不到腳本檔: {script}"
                 else:
                     try:
                         result = subprocess.run(
                             [sys.executable, script],
-                            cwd=os.getcwd(), capture_output=True, text=True, timeout=60
+                            cwd=cwd,
+                            capture_output=True,
+                            text=True,
+                            timeout=120
                         )
+                        # Debug process details
+                        print(f"🔍 {script} returncode: {result.returncode}")
+                        print(f"🔍 {script} stdout: {result.stdout!r}")
+                        print(f"🔍 {script} stderr: {result.stderr!r}")
+
                         if result.returncode == 0:
                             output = result.stdout.strip() or '(程式執行完成，無輸出)'
                             reply = f"{script} 執行完成：\n{output}"
                         else:
-                            print(f"❌ {script} error: {result.stderr.strip()}")
-                            reply = f"{script} 執行失敗：\n{result.stderr.strip()}"
+                            # 如果 stderr 空，就回傳 stdout
+                            err_msg = result.stderr.strip() or result.stdout.strip()
+                            reply = f"{script} 執行失敗 (returncode={result.returncode})：\n{err_msg}"
+                    except subprocess.TimeoutExpired:
+                        print(f"❌ Timeout expired when running {script}")
+                        reply = f"執行 {script} 超時，請稍後再試。"
                     except Exception as e:
                         print(f"❌ Exception running {script}: {e}")
                         reply = f"執行 {script} 發生例外：{e}"
-                executed = True
                 break
         if not executed:
             print("🔍 No command trigger matched, echo back.")
