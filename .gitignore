@@ -5,3 +5,9 @@
 "token.pickle"      
 credentials.json
 token.pickle
+credentials.json
+token.pickle
+lottery_history.txt
+lottery_line.txt
+group_result.txt
+group_result_*.txt

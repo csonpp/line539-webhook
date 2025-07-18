@@ -2,28 +2,22 @@ import os
 import re
 import sys
 import time
+import subprocess
 import requests
 from bs4 import BeautifulSoup
 from math import comb
-from datetime import datetime, timedelta
+from datetime import datetime
 
-# ==== 可選 Drive 驗證 (此腳本暫不使用 Drive，上傳功能預留) ====
-skip_drive = False
-SERVICE_ACCOUNT_FILE = "credentials.json"
-try:
-    import json
-    with open(SERVICE_ACCOUNT_FILE, 'r', encoding='utf-8') as tf:
-        json.load(tf)
-except Exception as e:
-    print(f"⚠️ 無法讀取 {SERVICE_ACCOUNT_FILE}，Drive 功能將被略過：{e}")
-    skip_drive = True
+# =====================
+# Lotto-Line Script: 自動抓號並對獎
+# =====================
 
-# ===== 設定 =====
+# ===== 設定區 =====
 LINE_CHANNEL_TOKEN = os.getenv("LINE_CHANNEL_TOKEN", "UCWxMVzypOWSEB2qUaBF+kIzUtKQYAAAsvR5k1praIARx4K2gR7v3/FaSYG8k7K9LcRDdn1Pzf/okys0TN2V+UoHtwXKaZ4a21AZ8vzkjMwLtZTWHuR5RuHXtkltpFxP+t4D0NxxrpRV2l261spcXwdB04t89/1O/w1cDnyilFU=")
-LINE_USER_IDS = [
+LINE_USER_IDS     = [
     os.getenv("LINE_USER_ID", "Ub8f9a069deae09a3694391a0bba53919"),
 ]
-# ====================
+# ===================
 
 def fetch_and_save_draws(filename="lottery_line.txt", retry=3):
     url = "https://www.pilio.idv.tw/lto539/list.asp"
@@ -41,6 +35,7 @@ def fetch_and_save_draws(filename="lottery_line.txt", retry=3):
             else:
                 print("已超過重試次數，放棄抓取。")
                 return None
+
     rows = soup.select("table tr")[1:]
     results = []
     for tr in rows:
@@ -51,6 +46,7 @@ def fetch_and_save_draws(filename="lottery_line.txt", retry=3):
             if len(nums) == 5:
                 line = f"{date_str} 開獎號碼：" + ", ".join(f"{n:02}" for n in nums)
                 results.append(line)
+
     if results:
         with open(filename, 'w', encoding='utf-8') as f:
             for l in results:
@@ -79,55 +75,83 @@ def parse_group_result_file(filename="group_result.txt"):
     for name in ['A + B', 'A + C', 'B + C']:
         pat = rf"{re.escape(name)}（.*?）：\n((?:.+\n)+?)(?=\n|$)"
         m = re.search(pat, data)
-        if not m: continue
+        if not m:
+            continue
         lines = m.group(1).strip().split('\n')
         rows = [list(map(int, re.findall(r"\d+", line))) for line in lines if '位置' not in line]
-        pillars = [[row[i] for row in rows if len(row)>i] for i in range(7)]
+        pillars = [[row[i] for row in rows if len(row) > i] for i in range(7)]
         sets[name] = pillars
     return sets
 
 def check_group_winning(open_nums, group_set):
     pillar_hits = [sum(1 for n in open_nums if n in pillar) for pillar in group_set]
-    hit_pillars = sum(1 for h in pillar_hits if h>0)
-    total_hits = sum(pillar_hits)
+    hit_pillars = sum(1 for h in pillar_hits if h > 0)
+    total_hits  = sum(pillar_hits)
     return hit_pillars, total_hits, pillar_hits
 
 def calc_hits(hit_pillars, total_hits, pillar_hits):
-    if hit_pillars<3 or total_hits<3: return 0
-    if hit_pillars==3 and total_hits==3: return 1
-    if hit_pillars==3 and total_hits==4: return 2
-    if hit_pillars==4 and total_hits==4: return 4
-    if hit_pillars==4 and total_hits==5: return 7
-    if hit_pillars==5 and total_hits==5: return 10
-    if hit_pillars==3 and total_hits==5:
-        if 3 in pillar_hits: return 3
-        if pillar_hits.count(2)==2: return 4
+    if hit_pillars < 3 or total_hits < 3:
+        return 0
+    if hit_pillars == 3 and total_hits == 3:
+        return 1
+    if hit_pillars == 3 and total_hits == 4:
+        return 2
+    if hit_pillars == 4 and total_hits == 4:
+        return 4
+    if hit_pillars == 4 and total_hits == 5:
+        return 7
+    if hit_pillars == 5 and total_hits == 5:
+        return 10
+    if hit_pillars == 3 and total_hits == 5:
+        if 3 in pillar_hits:
+            return 3
+        if pillar_hits.count(2) == 2:
+            return 4
         return 3
-    return comb(total_hits,3) if total_hits>=3 else 0
+    return comb(total_hits, 3) if total_hits >= 3 else 0
 
 def make_lottery_report(open_nums, group_sets):
     total = 0
     lines = [f"開獎號碼：{' '.join(f'{n:02}' for n in open_nums)}"]
     for name, set_ in group_sets.items():
         hp, th, ph = check_group_winning(open_nums, set_)
-        if hp>=3:
-            detail = '、'.join(f"第{i+1}柱{ph[i]}個({','.join(str(n) for n in set_[i] if n in open_nums)})" for i in range(7) if ph[i]>0)
-            hits = calc_hits(hp,th,ph)
+        if hp >= 3:
+            detail = '、'.join(
+                f"第{i+1}柱{ph[i]}個({','.join(str(n) for n in set_[i] if n in open_nums)})"
+                for i in range(7) if ph[i] > 0
+            )
+            hits = calc_hits(hp, th, ph)
             total += hits
             lines.append(f"{name}：中{hp}柱，共{th}號碼，{detail}，中{hits}碰")
         else:
             lines.append(f"{name}：未中獎，0碰")
     lines.append(f"本期共中{total}碰")
-    return '\n'.join(lines)
+    return "\n".join(lines)
 
 if __name__ == '__main__':
     latest = fetch_and_save_draws()
     if latest:
-        group_sets = parse_group_result_file()
-        nums = list(map(int, re.findall(r"開獎號碼：([\d ,]+)", latest)[0].replace(',', ' ').split()))
-        report = make_lottery_report(nums, group_sets)
-        now = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
-        msg = f"{latest}\n{report}\n推播時間：{now}"
+        # 若 group_result.txt 不在，先自動跑一次 line-4.py
+        if not os.path.exists('group_result.txt'):
+            print("⚠️ 找不到 group_result.txt，先執行 line-4.py 生成下注排列")
+            proc = subprocess.run(
+                [sys.executable, 'line-4.py'],
+                cwd=os.getcwd(), capture_output=True, text=True
+            )
+            print(f"line-4.py stdout:\n{proc.stdout.strip()}")
+            print(f"line-4.py stderr:\n{proc.stderr.strip()}")
+
+        try:
+            group_sets = parse_group_result_file('group_result.txt')
+        except FileNotFoundError:
+            print("❌ 執行 line-4.py 後仍找不到 group_result.txt，無法進行對獎")
+            sys.exit(1)
+
+        open_nums = list(map(int, re.findall(r"開獎號碼：([\d ,]+)", latest)[0].replace(',', ' ').split()))
+        report    = make_lottery_report(open_nums, group_sets)
+        now_str   = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+        msg       = f"{latest}\n{report}\n推播時間：{now_str}"
+
         print(msg)
         for uid in LINE_USER_IDS:
             send_line_bot_push(LINE_CHANNEL_TOKEN, uid, msg)
