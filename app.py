@@ -1,5 +1,3 @@
-from dotenv import load_dotenv
-load_dotenv()  # 這行要放在 import os 之後
 import os
 import re
 import json
@@ -11,7 +9,6 @@ from flask import Flask, request, abort
 from bs4 import BeautifulSoup
 from email.message import EmailMessage
 from dotenv import load_dotenv
-load_dotenv()  # 自动从 .env 载入环境变量
 
 # LINE SDK
 from linebot import LineBotApi, WebhookHandler
@@ -23,6 +20,9 @@ from googleapiclient.discovery import build
 from googleapiclient.http import MediaFileUpload
 from google.oauth2 import service_account
 from google_auth_oauthlib.flow import InstalledAppFlow
+
+# 先載入 .env 裡的環境變數（如果有）
+load_dotenv()
 
 app = Flask(__name__)
 
@@ -37,75 +37,52 @@ handler       = WebhookHandler(LINE_CHANNEL_SECRET)
 
 SCOPES = ['https://www.googleapis.com/auth/drive.file']
 
-# Base dir for all files, so that Flask cwd 不会乱
+# 健康檢查路由 (避免 404)
+@app.route("/", methods=["GET", "HEAD"])
+def health_check():
+    return "OK", 200
+
+# Base dir for file operations
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 
 # ---- 初始化 Google Drive Client ----
 credentials = None
 
-# 1) Env JSON
-sa_json = os.getenv('GOOGLE_SERVICE_ACCOUNT_JSON')
-if sa_json:
+# 嘗試用 GOOGLE_APPLICATION_CREDENTIALS 指向的檔案
+cred_path = os.getenv("GOOGLE_APPLICATION_CREDENTIALS", "")
+if cred_path and os.path.exists(cred_path):
     try:
-        info = json.loads(sa_json)
-        credentials = service_account.Credentials.from_service_account_info(info, scopes=SCOPES)
+        credentials = service_account.Credentials.from_service_account_file(
+            cred_path, scopes=SCOPES
+        )
     except Exception as e:
-        print("⚠️ SERVICE_ACCOUNT_JSON 解析錯誤：", e)
+        print("⚠️ 讀取 GOOGLE_APPLICATION_CREDENTIALS 失敗：", e)
 
-# 2) Env file
 if not credentials:
-    path = os.getenv('GOOGLE_APPLICATION_CREDENTIALS','')
-    if path and os.path.exists(path):
-        try:
-            credentials = service_account.Credentials.from_service_account_file(path, scopes=SCOPES)
-        except Exception as e:
-            print("⚠️ 讀取 GOOGLE_APPLICATION_CREDENTIALS 失敗：", e)
-
-# 3) credentials.json 當 Service Account
-cred_json = os.path.join(BASE_DIR, 'credentials.json')
-if not credentials and os.path.exists(cred_json):
-    try:
-        credentials = service_account.Credentials.from_service_account_file(cred_json, scopes=SCOPES)
-    except Exception as e:
-        print("⚠️ 以 Service Account 讀取 credentials.json 失敗：", e)
-
-# 4) OAuth client flow fallback
-if not credentials and os.path.exists(cred_json):
-    creds = None
-    token_path = os.path.join(BASE_DIR, 'token.pickle')
-    if os.path.exists(token_path):
-        with open(token_path, 'rb') as f:
-            creds = pickle.load(f)
-    if not creds or not creds.valid:
-        flow = InstalledAppFlow.from_client_secrets_file(cred_json, SCOPES)
-        creds = flow.run_local_server(port=0)
-        with open(token_path, 'wb') as f:
-            pickle.dump(creds, f)
-    credentials = creds
-
-if credentials:
-    drive_service = build('drive', 'v3', credentials=credentials)
-else:
     print("⚠️ 無法取得 Drive 憑證，上傳功能將被略過")
     drive_service = None
+else:
+    drive_service = build('drive', 'v3', credentials=credentials)
 
 
 def upload_and_get_link(filename: str) -> str:
+    """上傳檔案到 Google Drive 並回傳分享連結"""
     if not drive_service:
         return ""
     meta = {'name': os.path.basename(filename)}
     media = MediaFileUpload(filename, mimetype='text/plain')
-    f = drive_service.files().create(body=meta, media_body=media, fields='id').execute()
+    f = drive_service.files().create(
+        body=meta, media_body=media, fields='id'
+    ).execute()
     fid = f.get('id')
     drive_service.permissions().create(
-        fileId=fid,
-        body={'role': 'reader', 'type': 'anyone'}
+        fileId=fid, body={'role': 'reader', 'type': 'anyone'}
     ).execute()
     return f"https://drive.google.com/file/d/{fid}/view?usp=sharing"
 
 
 def fetch_and_save_draws(fn: str) -> bool:
-    """抓今彩539所有非週日開獎，寫入 fn"""
+    """抓今彩539號碼，寫入 fn"""
     url = "https://www.pilio.idv.tw/lto539/list.asp"
     try:
         r = requests.get(url, timeout=10)
@@ -115,24 +92,22 @@ def fetch_and_save_draws(fn: str) -> bool:
         print("❌ fetch_and_save_draws 連線失敗：", e)
         return False
 
-    rows = soup.select("table tr")[1:]
     lines = []
-    for tr in rows:
+    for tr in soup.select("table tr")[1:]:
         tds = tr.find_all("td")
-        if len(tds) < 2:
-            continue
-        date = tds[0].get_text(strip=True).split()[0].replace("/", "-")[:10]
+        if len(tds) < 2: continue
+        date_str = tds[0].get_text(strip=True).split()[0].replace("/", "-")[:10]
         try:
-            if datetime.strptime(date, "%Y-%m-%d").weekday() == 6:
+            if datetime.strptime(date_str, "%Y-%m-%d").weekday() == 6:
                 continue
         except:
             continue
         nums = list(map(int, re.findall(r"\d+", tds[1].get_text())))
         if len(nums) == 5:
-            lines.append(f"{date} 開獎號碼：" + ", ".join(f"{n:02}" for n in nums))
+            lines.append(f"{date_str} 開獎號碼：" + ", ".join(f"{n:02}" for n in nums))
 
     if not lines:
-        print("❌ fetch_and_save_draws: 沒抓到任何號碼")
+        print("❌ fetch_and_save_draws: 無資料")
         return False
 
     with open(fn, "w", encoding="utf-8") as f:
@@ -142,7 +117,7 @@ def fetch_and_save_draws(fn: str) -> bool:
 
 
 def append_missing_draws(fn: str):
-    """將遺漏的新增到 fn 檔案頂端"""
+    """補上遺漏的號碼到 fn 頂端"""
     existing = set()
     if os.path.exists(fn):
         with open(fn, encoding="utf-8") as f:
@@ -160,19 +135,18 @@ def append_missing_draws(fn: str):
     new = []
     for tr in soup.select("table tr")[1:]:
         tds = tr.find_all("td")
-        if len(tds) < 2:
-            continue
-        date = tds[0].get_text(strip=True).split()[0].replace("/", "-")[:10]
+        if len(tds) < 2: continue
+        date_str = tds[0].get_text(strip=True).split()[0].replace("/", "-")[:10]
         try:
-            if datetime.strptime(date, "%Y-%m-%d").weekday() == 6:
+            if datetime.strptime(date_str, "%Y-%m-%d").weekday() == 6:
                 continue
         except:
             continue
-        if date in existing:
+        if date_str in existing:
             continue
         nums = list(map(int, re.findall(r"\d+", tds[1].get_text())))
         if len(nums) == 5:
-            new.append(f"{date} 開獎號碼：" + ", ".join(f"{n:02}" for n in nums))
+            new.append(f"{date_str} 開獎號碼：" + ", ".join(f"{n:02}" for n in nums))
 
     if not new:
         print("ℹ️ append_missing_draws: 無新資料")
@@ -186,9 +160,9 @@ def append_missing_draws(fn: str):
 
 def read_latest_2_draws(fn: str):
     """
-    讀取前兩期開獎號碼，回傳：
-      txts: ['2025-07-17 開獎號碼：01, 02, 03, 04, 05', '2025-07-16 開獎號碼：...']
-      all_nums: [1,2,3,4,5, …]  # 合併兩期的所有號碼，整數列表
+    讀前兩期：回傳
+      txts: ['2025-07-17 開獎號碼：01,02,…', '2025-07-16 開獎號碼：…']
+      all_nums: [1,2,3,…]  # 合併後不重複之整數列表
     """
     rec = []
     with open(fn, encoding="utf-8") as f:
@@ -196,9 +170,7 @@ def read_latest_2_draws(fn: str):
             m = re.match(r"(\d{4}-\d{2}-\d{2}) 開獎號碼：(.+)", line.strip())
             if not m:
                 continue
-            # parse date
             dt = datetime.strptime(m.group(1), "%Y-%m-%d")
-            # parse numbers 為整數列表
             nums = list(map(int, re.findall(r"\d+", m.group(2))))
             if len(nums) == 5:
                 rec.append((dt, nums))
@@ -206,22 +178,18 @@ def read_latest_2_draws(fn: str):
     if len(rec) < 2:
         raise ValueError("歷史不足兩期")
 
-    # 依日期排序，取最後兩筆
     rec.sort(key=lambda x: x[0])
     last_two = rec[-2:]
-    # 重新組出要寫入報表的文字
     txts = [
         f"{d:%Y-%m-%d} 開獎號碼：" + ", ".join(f"{n:02}" for n in ns)
         for d, ns in last_two
     ]
-    # 合併兩期所有號碼，去重、排序（整數比大小不會出錯）
     all_nums = sorted({n for _, ns in last_two for n in ns})
     return txts, all_nums
 
 
-
 def group_numbers(cg):
-    rem = sorted(set(range(1,40)) - set(cg))
+    rem = sorted(set(range(1, 40)) - set(cg))
     A   = rem[:14]
     B   = rem[14:28]
     overflow = rem[28:]
@@ -243,7 +211,6 @@ def write_groups(A, B, C):
 
 def process_report() -> str:
     hist = os.path.join(BASE_DIR, "lottery_history.txt")
-    # 總是先 fetch 全部，再 append
     if not fetch_and_save_draws(hist):
         return ""
     append_missing_draws(hist)
@@ -262,14 +229,14 @@ def process_report() -> str:
         return ""
 
     link = upload_and_get_link(report_file)
-    print("🔗 上傳並取得分享連結：", link)
+    print("🔗 已上傳並取得分享連結：", link)
     return link or ""
 
 
-# ====== LINE Webhook ======
+# ===== LINE Webhook =====
 @app.route("/callback", methods=['POST'])
 def callback():
-    signature = request.headers.get('X-Line-Signature','')
+    signature = request.headers.get('X-Line-Signature', '')
     body      = request.get_data(as_text=True)
     try:
         handler.handle(body, signature)
@@ -303,7 +270,7 @@ def on_message(event):
             reply = "❌ 報表產生失敗，請稍後再試。"
         line_bot_api.reply_message(event.reply_token, TextSendMessage(text=reply))
     else:
-        # 其他訊息一律 echo
+        # 其他訊息原樣回覆
         line_bot_api.reply_message(event.reply_token, TextSendMessage(text=txt))
 
 
