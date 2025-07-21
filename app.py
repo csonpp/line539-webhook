@@ -1,3 +1,5 @@
+from dotenv import load_dotenv
+load_dotenv()  # 這行要放在 import os 之後
 import os
 import re
 import json
@@ -8,6 +10,8 @@ from datetime import datetime, timedelta
 from flask import Flask, request, abort
 from bs4 import BeautifulSoup
 from email.message import EmailMessage
+from dotenv import load_dotenv
+load_dotenv()  # 自动从 .env 载入环境变量
 
 # LINE SDK
 from linebot import LineBotApi, WebhookHandler
@@ -181,24 +185,39 @@ def append_missing_draws(fn: str):
 
 
 def read_latest_2_draws(fn: str):
-    """回傳 [(line1,line2), all_nums_list]"""
+    """
+    讀取前兩期開獎號碼，回傳：
+      txts: ['2025-07-17 開獎號碼：01, 02, 03, 04, 05', '2025-07-16 開獎號碼：...']
+      all_nums: [1,2,3,4,5, …]  # 合併兩期的所有號碼，整數列表
+    """
     rec = []
     with open(fn, encoding="utf-8") as f:
-        for l in f:
-            m = re.match(r"(\d{4}-\d{2}-\d{2}) 開獎號碼：(.+)", l.strip())
+        for line in f:
+            m = re.match(r"(\d{4}-\d{2}-\d{2}) 開獎號碼：(.+)", line.strip())
             if not m:
                 continue
+            # parse date
             dt = datetime.strptime(m.group(1), "%Y-%m-%d")
+            # parse numbers 為整數列表
             nums = list(map(int, re.findall(r"\d+", m.group(2))))
             if len(nums) == 5:
-                rec.append((dt, m.group(2).split(", ")))
+                rec.append((dt, nums))
+
     if len(rec) < 2:
         raise ValueError("歷史不足兩期")
+
+    # 依日期排序，取最後兩筆
     rec.sort(key=lambda x: x[0])
     last_two = rec[-2:]
-    txts = [f"{d:%Y-%m-%d} 開獎號碼：" + ", ".join(ns) for d,ns in last_two]
-    all_nums = sorted({n for _,ns in last_two for n in ns})
+    # 重新組出要寫入報表的文字
+    txts = [
+        f"{d:%Y-%m-%d} 開獎號碼：" + ", ".join(f"{n:02}" for n in ns)
+        for d, ns in last_two
+    ]
+    # 合併兩期所有號碼，去重、排序（整數比大小不會出錯）
+    all_nums = sorted({n for _, ns in last_two for n in ns})
     return txts, all_nums
+
 
 
 def group_numbers(cg):
