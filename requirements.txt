@@ -1,9 +1,11 @@
 flask
-line-bot-sdk
 gunicorn
+line-bot-sdk>=2.4.2
+python-dotenv
 requests
 beautifulsoup4
 google-api-python-client
+google-auth
+google-auth-httplib2
 google-auth-oauthlib
-python-dotenv
 
