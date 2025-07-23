@@ -35,8 +35,8 @@ LINE_USER_IDS = [uid.strip() for uid in os.getenv("LINE_USER_ID", "Ub8f9a069deae
 # Email（Brevo / 其他 SMTP）
 SMTP_HOST = os.getenv("SMTP_HOST", "smtp-relay.brevo.com")
 SMTP_PORT = int(os.getenv("SMTP_PORT", "587"))
-SMTP_USER = os.getenv("SMTP_USER", "")
-SMTP_PASS = os.getenv("SMTP_PASS", "")
+SMTP_USER = os.getenv("SMTP_USER", "908708004@smtp-brevo.com")
+SMTP_PASS = os.getenv("SMTP_PASS", "Wx8670BtzIcnO9hm")
 MAIL_FROM = os.getenv("MAIL_FROM", "twblackbox@gmail.com")
 MAIL_TO   = os.getenv("MAIL_TO",   "csonpp@gmail.com")
 
