@@ -1,11 +1,18 @@
+#!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-# lotto-line.py  (對獎邏輯 / 碰數計算 / LINE 推播)
-# Updated: 2025-07-23
+"""
+lotto-line.py
+-------------------------------------------------
+- 抓取開獎、對獎（幾碰），輸出報告
+- 需要先有 group_result.txt（由 line-4.py 產出）
+- 用 LINE Bot Push 推播結果
+"""
 
 import os
 import re
 import sys
 import time
+import json
 import requests
 import subprocess
 from bs4 import BeautifulSoup
@@ -13,13 +20,14 @@ from math import comb
 from datetime import datetime
 from typing import Dict, List, Tuple
 
+# LINE Bot
 LINE_CHANNEL_TOKEN = (os.getenv("LINE_CHANNEL_TOKEN") or os.getenv("LINE_CHANNEL_ACCESS_TOKEN") or "").strip()
+LINE_CHANNEL_TOKEN = "".join(ch for ch in LINE_CHANNEL_TOKEN if ord(ch) < 128)
 LINE_USER_IDS = [uid.strip() for uid in os.getenv("LINE_USER_ID", "Ub8f9a069deae09a3694391a0bba53919").split(",") if uid.strip()]
+DEBUG = os.getenv("DEBUG", "0") == "1"
 
 GROUP_FILE   = os.getenv("GROUP_FILE", "group_result.txt")
-HISTORY_FILE = os.getenv("HISTORY_FILE", "lottery_line.txt")
-DEBUG        = os.getenv("DEBUG", "0") == "1"
-
+HISTORY_FILE = os.getenv("HISTORY_FILE", "lottery_history.txt")
 
 # ---------------------
 # 抓官網資料
@@ -60,7 +68,6 @@ def fetch_and_save_draws(filename: str = HISTORY_FILE, retry: int = 3) -> str | 
         print("⚠️ 無開獎資料可寫入。")
         return None
 
-
 # ---------------------
 # LINE 推播
 # ---------------------
@@ -82,7 +89,6 @@ def send_line_bot_push(token: str, to_id: str, msg: str) -> int:
         print("❌ LINE 推播發生例外：", e)
         return -1
 
-
 # ---------------------
 # 解析 group_result.txt
 # ---------------------
@@ -103,7 +109,6 @@ def parse_group_result_file(filename: str = GROUP_FILE) -> Dict[str, List[List[i
         sets[name] = pillars
     return sets
 
-
 # ---------------------
 # 中獎計算
 # ---------------------
@@ -112,7 +117,6 @@ def check_group_winning(open_nums: List[int], group_set: List[List[int]]) -> Tup
     hit_pillars = sum(1 for h in pillar_hits if h > 0)
     total_hits  = sum(pillar_hits)
     return hit_pillars, total_hits, pillar_hits
-
 
 def calc_hits(hit_pillars: int, total_hits: int, pillar_hits: List[int]) -> int:
     if hit_pillars < 3 or total_hits < 3:
@@ -135,7 +139,6 @@ def calc_hits(hit_pillars: int, total_hits: int, pillar_hits: List[int]) -> int:
         return 3
     return comb(total_hits, 3) if total_hits >= 3 else 0
 
-
 def make_lottery_report(open_nums: List[int], group_sets: Dict[str, List[List[int]]]) -> str:
     total = 0
     lines = [f"開獎號碼：{' '.join(f'{n:02}' for n in open_nums)}"]
@@ -156,14 +159,13 @@ def make_lottery_report(open_nums: List[int], group_sets: Dict[str, List[List[in
     lines.append(f"本期共中{total}碰")
     return "\n".join(lines)
 
-
 # ---------------------
 # 主流程
 # ---------------------
 if __name__ == '__main__':
     latest = fetch_and_save_draws()
     if not latest:
-        print("無法取得開獎號碼，停止推播。")
+        print("無法取得開獎號碼，停止流程。")
         sys.exit(1)
 
     if not os.path.exists(GROUP_FILE):
@@ -182,11 +184,11 @@ if __name__ == '__main__':
         print("❌ 找不到 group_result.txt，無法進行對獎")
         sys.exit(1)
 
-    m = re.search(r"開獎號碼：([\d ,]+)", latest)
+    m = re.search(r"開獎號碼：([\\d ,]+)", latest)
     if not m:
         print("❌ 無法從最新行解析開獎號碼")
         sys.exit(1)
-    open_nums = list(map(int, re.findall(r"\d+", m.group(1))))
+    open_nums = list(map(int, re.findall(r"\\d+", m.group(1))))
 
     report = make_lottery_report(open_nums, group_sets)
     now_str = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
@@ -194,4 +196,8 @@ if __name__ == '__main__':
 
     print(msg)
     for uid in LINE_USER_IDS:
-        send_line_bot_push(LINE_CHANNEL_TOKEN, uid, msg)
+        status = send_line_bot_push(LINE_CHANNEL_TOKEN, uid, msg)
+        if status == 200:
+            print(f"📨 已成功推播給 {uid}")
+        else:
+            print(f"❌ 推播給 {uid} 失敗 (status={status})")
