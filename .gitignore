@@ -1,15 +1,22 @@
-"credentials.json" 
-"credentials.json" 
-"token.pickle"      
-"credentials.json" 
-"token.pickle"      
-credentials.json
+# secrets
+service_account.json
+token.json
 token.pickle
-credentials.json
-token.pickle
+sa.b64
+*.pem
+*.p12
+.env
+
+# runtime files
+group_result*.txt
 lottery_history.txt
-lottery_line.txt
-group_result.txt
-group_result_*.txt
-"git\347\266\262\345\235\200.txt" 
-"line539-webhook.git/"            
+
+# python
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+
+# misc
+.DS_Store
+Thumbs.db
